@@ -1,0 +1,3 @@
+print number of organizations
+print number of bank name
+print all product names
