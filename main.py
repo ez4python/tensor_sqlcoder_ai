@@ -112,7 +112,7 @@ async def generate(req: GenerateRequest):
         if not sql_query or "i do not know" in sql_query.lower():
             return {
                 "question": req.question,
-                "sql": None,
+                "sql": sql_query,
                 "results": [],
                 "error": "Model could not generate a valid SQL query."
             }
@@ -129,9 +129,9 @@ async def generate(req: GenerateRequest):
         }
 
     except psycopg2.Error as db_err:
-        raise HTTPException(status_code=400, detail=f"SQL Error: {db_err.pgerror}")
+        raise HTTPException(status_code=200, detail=f"SQL Error: {db_err.pgerror}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=200, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
