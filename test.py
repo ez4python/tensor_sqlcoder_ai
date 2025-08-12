@@ -30,12 +30,19 @@ payload = {
 }
 
 response = requests.post(url, headers=headers, data=json.dumps(payload))
+data = response.json()
 if response.status_code == 200:
-    data = response.json()
+    print("Data:", data)
     print("\n📌 SQL so‘rovi:")
     print(data["sql"])
     print("\n📊 Natija:")
-    for row in data["results"]:
-        print(row)
+    if data.get("results"):
+        for row in data["results"]:
+            print(row)
 else:
-    print("Xatolik:", response.status_code, response.text)
+    print(
+        "Xatolik:",
+        response.status_code,
+        response.text,
+        f"\nSQL-Query: {data["sql"]}"
+    )
