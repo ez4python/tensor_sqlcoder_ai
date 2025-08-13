@@ -1,32 +1,25 @@
-import os
 import uvicorn
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import psycopg2
-from urllib.parse import urlparse
 import asyncio
 
-from dotenv import load_dotenv
 
-load_dotenv()
+from utils import (
+    DATABASE_URL,
+    MODEL_NAME,
+    DB_NAME,
+    DB_USER,
+    DB_PASSWORD,
+    DB_HOST,
+    DB_PORT,
+    log_sql_error
+)
+
 
 logging.set_verbosity_error()
-
-MODEL_NAME = os.getenv("MODEL_NAME", "defog/sqlcoder-7b-2")
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable is required!")
-
-
-result = urlparse(DATABASE_URL)
-DB_USER = result.username
-DB_PASSWORD = result.password
-DB_NAME = result.path[1:]
-DB_HOST = result.hostname
-DB_PORT = result.port
 
 
 app = FastAPI(
@@ -41,6 +34,7 @@ model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     trust_remote_code=True,
     torch_dtype=torch.float16,
+    bnb_4bit_compute_dtype=torch.float16,
     device_map="auto",
     use_cache=True,
     # load_in_8bit=True,
@@ -113,37 +107,64 @@ async def generate(req: GenerateRequest):
 
         print(f"Generated SQL: {sql_query}")
 
+        response = {
+            "question": req.question
+        }
+
         if not sql_query or "i do not know" in sql_query.lower():
-            return {
-                "question": req.question,
+            response.update({
                 "sql": sql_query,
-                "results": [],
-                "error": "Model could not generate a valid SQL query."
-            }
+                "results": None,
+                "error": "Model could not generate a valid SQL query (empty or 'I do not know')."
+            })
+            log_sql_error(
+                response["question"],
+                response["error"],
+                response["sql"],
+                response["results"]
+                )
+            return response
 
         if not sql_query.endswith(";"):
             sql_query += ";"
+            response.update({
+                "sql": sql_query
+            })
 
         results = await asyncio.to_thread(run_sql_sync, sql_query)
+        
+        response.update({
+            "results": results,
+            "status_code": 200
+            })
 
-        return {
-            "question": req.question,
-            "sql": sql_query,
-            "results": results
-        }
+        return response
 
     except psycopg2.Error as db_err:
-        return {
+        response.update({
             "status_code": 400,
-            "detail": f"SQL Error: {db_err.pgerror}",
-            "sql": sql_query
-        }
+            "error": f"SQL Error: {db_err}"
+        })
+        log_sql_error(
+            response.get("question"),
+            response.get("error"),
+            response.get("sql"),
+            response.get("results")
+        )
+        return response
+    
     except Exception as e:
-        return {
+        response.update({
             "status_code": 500,
-            "detail": f"Error: {e}",
-            "sql": sql_query
-        }
+            "error": f"Error: {e}"
+        })
+        log_sql_error(
+            response.get("question"),
+            response.get("error"),
+            response.get("sql"),
+            response.get("results")
+        )
+        return response
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
