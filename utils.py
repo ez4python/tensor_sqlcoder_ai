@@ -51,13 +51,24 @@ def log_sql_error(question: str, error_msg: str, sql_query: str, results):
             """)
         
         cur.execute(
-            "INSERT INTO failed_queries (question, error, sql_query, results) VALUES (%s, %s, %s, %s)",
-            (question, error_msg, json.dumps(results) if results is not None else None)
+            """
+            INSERT INTO failed_queries (question, error, sql_query, results)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                question,
+                error_msg,
+                sql_query,
+                json.dumps(results) if results is not None else None
+            )
         )
 
+        inserted_id = cur.fetchone()[0]
         conn.commit()
         cur.close()
         conn.close()
+        return inserted_id
     
     except Exception as log_err:
         print(f"Logging failed: {log_err}")
