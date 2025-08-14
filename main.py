@@ -37,12 +37,12 @@ model = AutoModelForCausalLM.from_pretrained(
     bnb_4bit_compute_dtype=torch.float16,
     device_map="auto",
     use_cache=True,
-    # load_in_8bit=True,
     load_in_4bit=True,
+    max_memory={
+        0: "30GiB",
+        "cpu": "64GiB"
+    }
 )
-print("*" * 15)
-print("KERAKLI:", model.config.max_position_embeddings)
-print("*" * 15)
 
 pipe = pipeline(
     "text-generation",
@@ -55,10 +55,7 @@ pipe = pipeline(
 )
 
 def build_prompt(prompt_template: str, question: str, metadata: str) -> str:
-    return prompt_template.format(
-        user_question=question,
-        table_metadata_string=metadata
-    )
+    return prompt_template.replace("{user_question}", question).replace("{table_metadata_string}", metadata)
 
 def generate_sql_from_prompt(full_prompt: str) -> str:
     eos_token_id = tokenizer.eos_token_id
@@ -91,11 +88,12 @@ def run_sql_sync(query: str):
     conn.close()
     return [dict(zip(colnames, row)) for row in rows]
 
-# --- REQUEST MODEL ---
 
+# --- REQUEST and FEEDBACK MODELS ---
 class FeedbackRequest(BaseModel):
     id: int
     feedback: bool
+
 
 @app.post("/feedback")
 async def give_feedback(req: FeedbackRequest):
@@ -126,10 +124,12 @@ async def give_feedback(req: FeedbackRequest):
             "error": str(e)
             }
 
+
 class GenerateRequest(BaseModel):
     question: str
     metadata: str
     prompt: str
+
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
@@ -140,76 +140,67 @@ async def generate(req: GenerateRequest):
         "status_code": None,
         "error": None
     }
-    try:
-        # 1️⃣ Promptdan SQL generatsiya
-        full_prompt = build_prompt(req.prompt, req.question, req.metadata)
-        print("Question:", req.question)
-        sql_query = generate_sql_from_prompt(full_prompt).strip()
-        response["sql"] = sql_query
 
-        if not sql_query or "i do not know" in sql_query.lower():
-            response.update({
-                "status_code": 400,
-                "error": "Model could not generate a valid SQL query (empty or 'I do not know')."
-            })
-            error_id = log_sql_error(
-                req.question, response["error"], sql_query, None
-            )
-            response["error_id"] = error_id
-            return response
+    # 1️⃣ Promptdan SQL generatsiya
+    full_prompt = build_prompt(req.prompt, req.question, req.metadata)
+    sql_query = generate_sql_from_prompt(full_prompt).strip()
+    response["sql"] = sql_query
+    print("Question:", req.question)
+    print("SQL Query:", sql_query)
 
-        if not sql_query.endswith(";"):
-            sql_query += ";"
-            response["sql"] = sql_query
-
-        # 2️⃣ SQL bajarish
-        try:
-            results = await asyncio.to_thread(run_sql_sync, sql_query)
-            response["results"] = results
-        except psycopg2.errors.UndefinedColumn as e:
-            # Ustun nomi xatosi
-            err_msg = f"Undefined column: {str(e).strip()}"
-            response.update({
-                "status_code": 400,
-                "error": err_msg
-            })
-            error_id = log_sql_error(req.question, err_msg, sql_query, None)
-            response["error_id"] = error_id
-            return response
-        except Exception as e:
-            # Har qanday boshqa SQL xatosi
-            err_msg = str(e).strip()
-            response.update({
-                "status_code": 400,
-                "error": err_msg
-            })
-            error_id = log_sql_error(req.question, err_msg, sql_query, None)
-            response["error_id"] = error_id
-            return response
-
-        # 3️⃣ Bo‘sh natija
-        if not response["results"]:
-            response.update({
-                "status_code": 404,
-                "error": "No results found"
-            })
-            error_id = log_sql_error(req.question, "Empty results", sql_query, [])
-            response["error_id"] = error_id
-
-        else:
-            response["status_code"] = 200
-
-        return response
-
-    except Exception as e:
-        err_msg = str(e).strip()
+    if not sql_query or "i do not know" in sql_query.lower():
         response.update({
-            "status_code": 500,
-            "error": err_msg
+            "status_code": 400,
+            "error": "Model could not generate a valid SQL query (empty or 'I do not know')."
         })
-        error_id = log_sql_error(req.question, err_msg, response["sql"], response["results"])
+        error_id = log_sql_error(
+            req.question, response["error"], sql_query, None
+        )
         response["error_id"] = error_id
         return response
+
+    if not sql_query.endswith(";"):
+        sql_query += ";"
+        response["sql"] = sql_query
+
+    # 2️⃣ SQL bajarish
+    try:
+        results = await asyncio.to_thread(run_sql_sync, sql_query)
+        response["results"] = results
+    except psycopg2.errors.UndefinedColumn as e:
+        # Ustun nomi xatosi
+        err_msg = f"Undefined column: {str(e).strip()}"
+        response.update({
+            "status_code": 400,
+            "error": err_msg
+        })
+        error_id = log_sql_error(req.question, err_msg, sql_query, None)
+        response["error_id"] = error_id
+        return response
+    except Exception as e:
+        # Har qanday boshqa SQL xatosi
+        err_msg = str(e).strip()
+        response.update({
+            "status_code": 400,
+            "error": err_msg
+        })
+        error_id = log_sql_error(req.question, err_msg, sql_query, None)
+        response["error_id"] = error_id
+        return response
+
+    # 3️⃣ Bo‘sh natija
+    if not response["results"]:
+        response.update({
+            "status_code": 404,
+            "error": "No results found"
+        })
+        error_id = log_sql_error(req.question, "Empty results", sql_query, [])
+        response["error_id"] = error_id
+    else:
+        response["status_code"] = 200
+
+    return response
+
 
 
 if __name__ == "__main__":
