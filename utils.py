@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 load_dotenv()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 MODEL_NAME = os.getenv("MODEL_NAME", "defog/sqlcoder-7b-2")
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -21,6 +23,14 @@ DB_HOST = db.hostname
 DB_PORT = db.port
 
 
+def get_table_names():
+    files_list = [
+    os.path.splitext(f)[0]
+    for f in os.listdir(BASE_DIR)
+    if os.path.isfile(os.path.join(BASE_DIR, f)) and f != 'keys'
+]
+    return files_list
+    
 def log_sql_error(question: str, error_msg: str, sql_query: str, results):
     """
     Savol xatoni databasega yozish

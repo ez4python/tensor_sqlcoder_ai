@@ -5,7 +5,8 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 question_file = os.path.join(BASE_DIR, 'question.txt')
-schema_file = os.path.join(BASE_DIR, 'metadata.sql')
+# schema_file = os.path.join(BASE_DIR, 'metadata.sql')
+schema_file = "/home/tensor/coding/vscode/mistral_sql/kimyo_db.md"
 prompt_file = os.path.join(BASE_DIR, 'prompt.md')
 
 with open(question_file, 'r', encoding='utf-8') as f:
@@ -17,8 +18,11 @@ with open(schema_file, 'r', encoding='utf-8') as f:
 with open(prompt_file, 'r', encoding='utf-8') as f:
     prompt_template = f.read().strip()
 
-generate_url = "http://192.168.7.179:8000/generate"
-feedback_url = "http://192.168.7.179:8000/feedback"
+HOST = "localhost"
+# HOST = "192.168.7.179"
+
+generate_url = f"http://{HOST}:8000/generate"
+feedback_url = f"http://{HOST}:8000/feedback"
 headers = {'Content-Type': 'application/json'}
 
 payload = {

@@ -1,7 +1,7 @@
 import uvicorn
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 import psycopg2
 import asyncio
@@ -38,10 +38,6 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     use_cache=True,
     load_in_4bit=True,
-    max_memory={
-        0: "30GiB",
-        "cpu": "64GiB"
-    }
 )
 
 pipe = pipeline(
@@ -51,7 +47,7 @@ pipe = pipeline(
     max_new_tokens=128,
     do_sample=False,
     return_full_text=False,
-    num_beams=2,
+    num_beams=1,
 )
 
 def build_prompt(prompt_template: str, question: str, metadata: str) -> str:
@@ -62,6 +58,7 @@ def generate_sql_from_prompt(full_prompt: str) -> str:
     generated_query = (
         pipe(
             full_prompt,
+            use_cache=False,
             num_return_sequences=1,
             eos_token_id=eos_token_id,
             pad_token_id=eos_token_id,
@@ -70,15 +67,17 @@ def generate_sql_from_prompt(full_prompt: str) -> str:
         .split("```")[0]
         .strip()
     )
+    torch.cuda.empty_cache()
+
     return generated_query
 
 def run_sql_sync(query: str):
     conn = psycopg2.connect(
-        database = DB_NAME,
-        user = DB_USER,
-        password = DB_PASSWORD,
-        host = DB_HOST,
-        port = DB_PORT
+        database = "kimyo_db",
+        user = "postgres",
+        password = "1",
+        host = "localhost",
+        port = "5432"
     )
     cur = conn.cursor()
     cur.execute(query)
